@@ -1,0 +1,229 @@
+---
+title: "Trabalho_series"
+author: "victor"
+date: "2023-06-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r}
+library(yfR)
+library(rugarch)
+library(forecast)
+library(tidyverse)
+library(xts)
+library(ggplot2)
+library(tseries)
+library(quantmod)
+library(zoo)
+library(FinTS)
+library(fBasics)
+library(shiny)
+library(mailtoR)
+library(plotly)
+```
+
+A ação "Sugar" (SB=F) é um contrato futuro de açúcar bruto negociado na Bolsa de Valores de Nova York (ICE Futures US). Contratos futuros são acordos padronizados para a compra ou venda de um ativo subjacente (neste caso, açúcar bruto) em uma data futura específica e a um preço pré-determinado.
+
+O contrato futuro de açúcar bruto é usado como uma ferramenta de hedge por produtores, comerciantes e consumidores de açúcar para mitigar os riscos associados às flutuações de preços. Além disso, especuladores também podem participar do mercado de futuros do açúcar para obter lucros com as mudanças nos preços. A quantidade padrão de um contrato é de 112.000 libras (50.8 toneladas) e o contrato é negociado em lotes de 100 ações.
+
+A cotação do contrato futuro de açúcar bruto (SB=F) é influenciada por vários fatores, como oferta e demanda globais de açúcar, condições climáticas que podem afetar a produção de cana-de-açúcar, políticas governamentais relacionadas à produção e exportação de açúcar, flutuações cambiais e desenvolvimentos econômicos e geopolíticos que impactam o mercado de commodities em geral.
+Segue a plotagem do preço ajustado pelo ano.
+```{r}
+# Data
+nome_acao <- "SB=F"   # Código no Yahoo Finance
+data_ini  <- "2015-01-01" # Data de inicio
+data_fim  <- Sys.Date() # Data de fim
+dados_acucar <- yf_get(tickers = nome_acao, first_date = data_ini, last_date = data_fim)
+head(dados_acucar)
+
+p = ggplot(data = dados_acucar, aes(x = ref_date, y = price_adjusted)) + geom_line(color= 'blue')+ labs(x="Data (jan/2015 - jun/2023)", y = "Preço ajustado do açúcar(USD)", title = "Variação do preço ajustado do açúcar ao longo do tempo")
+plot(p)
+```
+
+Pode-se observar que o valor médio não é zero e a variância é muito alta. Isso indica que a série temporal é não estacionária, com média e variância variáveis. A mesma conclusão pode ser obtida a partir do gráfico de ACF (função de autocorrelação) mostrado acima, uma vez que ela nunca diminui.
+
+```{r}
+acf(dados_acucar$price_adjusted)
+```
+
+
+Para analisar esta série temporal, usaremos o preço ajustado do retorno, afim de considerar eventos corporativos, como dividendos, desdobramentos de ações e agrupamentos de ações, que podem afetar os preços das ações.
+```{r}
+a<- zoo(dados_acucar$ret_adjusted_prices, as.Date(as.character(dados_acucar$ref_date), format = c("%Y-%m-%d")))
+retornos = plot(a, type='l', ylab = "preço dos retornos ajustados (USD)", main="Preço dos retornos ajustados de jan/2015 - Jun/2023")
+```
+Para estabilizar a variância, é utilizada a log-retornos, conforme mostrado na Figura 3. Este gráfico de série temporal mostra que a média é constante e próxima de zero.
+
+
+a seguir plotaremos o pacf e o acf, lembrando que as linhas tracejadas horizontalmente vão mostrar se algum pico significativo, olhando para o ACF concluimos que essa série não possui auto correlações
+```{r}
+ts_dados_acucar <- na.omit(a)
+
+acf(coredata(ts_dados_acucar), main="ACF Retornos açucar")
+
+pacf(coredata(ts_dados_acucar), main = "PACF Retornos açucar")
+```
+Investigando se a série temporal possui estacionariedade através do teste de Dickey Fuller (ADF), O teste de ADF avalia a hipótese nula de que uma raiz unitária está presente na série temporal, indicando não estacionariedade. A hipótese alternativa é que a série temporal é estacionária. O teste calcula uma estatística de teste, normalmente denominada "estatística ADF", e a compara com valores críticos para determinar a significância estatística.
+```{r}
+adf.test(dados_acucar$price_adjusted) #Original 
+adf.test(ts_dados_acucar) #Log-returno
+coredata_ts <- coredata(ts_dados_acucar)
+```
+Portanto, rejeitamos a hipótese nula de que a série 'ts_dados_acucar' é não estacionária.Com base nessas informações, podemos concluir que os resultados do teste ADF indicam evidências estatísticas para suportar a hipótese de que a série ts_dados_acucar é estacionária. Isso significa que a série não possui tendências sistemáticas ou padrões de comportamento que variam ao longo do tempo, sendo mais adequada para análise e modelagem de séries temporais estacionárias.
+O gráfico da série temporal, mostra que pode haver um efeito ARCH nos dados de rendimento diário. Se houver um efeito ARCH, um modelo GARCH pode ser ajustado. Caso contrário, o modelo GARCH não pode ser usado para ajustar os dados.
+```{r}
+ArchTest(ts_dados_acucar,lag=12)
+```
+Em resumo, com base nos resultados do teste ARCH LM, concluímos que a série temporal possui efeitos ARCH significativos, indicando a presença de heterocedasticidade condicional. Isso sugere que um modelo GARCH (Generalized Autoregressive Conditional Heteroskedasticity) pode ser adequado para modelar a variância condicional da série temporal.
+Análise exploratória
+
+```{r pressure, echo=FALSE}
+basicStats(ts_dados_acucar)
+```
+QQPLOT E KURTOSIS
+```{r}
+qqnorm(ts_dados_acucar)
+qqline(ts_dados_acucar, col = 2) 
+kurtosis(ts_dados_acucar)
+```
+
+Pode-se observar que a média é 0 e a distribuição dos log retornos possui caudas pesadas. A mesma conclusão pode ser observada no gráfico QQ, conforme mostrado acima. Embora haja uma considerável divergência em relação ao quantil teórico da distribuição normal, a série apresenta uma distribuição um tanto normal com caudas pesadas em ambas as extremidades, uma vez que a curtose é positiva, com valor igual a 2.207806.
+teste garch(1,1)
+```{r}
+g11=garch(coredata_ts,order=c(1,1))
+g11
+summary(g11) #checking p value 
+AIC(g11)
+```
+Teste garch(2,2)
+```{r}
+g22=garch(coredata_ts,order=c(2,2))
+summary(g22)
+AIC(g22)
+
+```
+
+teste
+```{r}
+garch11.spec=ugarchspec(variance.model=list(garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0)))
+#estimação do modelo 
+garch11.fit=ugarchfit(spec=garch11.spec, data=ts_dados_acucar)
+garch11.fit
+```
+
+Modelo com distribuição t assimétrica.
+```{r}
+garch11.t.spec=ugarchspec(variance.model=list(garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0)), distribution.model = "std")
+#estimate model 
+garch11.t.fit=ugarchfit(spec=garch11.t.spec, data=ts_dados_acucar)
+garch11.t.fit
+
+```
+
+
+```{r}
+#---4. eGARCH(1,1) model with t-distribution
+egarch11.t.spec=ugarchspec(variance.model=list(model = "eGARCH", garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0)), distribution.model = "std")
+#estimate model 
+egarch11.t.fit=ugarchfit(spec=egarch11.t.spec, data=ts_dados_acucar)
+egarch11.t.fit
+```
+fGarch (1,1)
+
+```{r}
+#---5. fGARCH(1,1) model with t-distribution
+fgarch11.t.spec=ugarchspec(variance.model=list(model = "fGARCH", garchOrder=c(1,1), submodel = "APARCH"), mean.model=list(armaOrder=c(0,0)), distribution.model = "std")
+#estimate model 
+fgarch11.t.fit=ugarchfit(spec=fgarch11.t.spec, data=ts_dados_acucar)
+fgarch11.t.fit
+```
+
+iGarch(1,1)
+```{r}
+#---6. iGARCH (1,1) Model with Normal Distribution
+igarch11.t.spec=ugarchspec(variance.model=list(model = "iGARCH", garchOrder=c(1,1)), mean.model=list(armaOrder=c(0 , 0 )), distribution.model = "std")
+igarch11.t.fit=ugarchfit(spec=igarch11.t.spec, data=ts_dados_acucar)
+igarch11.t.fit
+```
+
+```{r}
+#Previsão 
+#Fit ARMA(0,0)-eGARCH(1,1) modelo com distribuição-t
+egarch11.t.spec=ugarchspec(variance.model=list(model = "eGARCH", garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0)), distribution.model = "std")
+#estimate model 
+egarch11.t.fit=ugarchfit(spec=egarch11.t.spec, data=ts_dados_acucar, solver = "hybrid")
+forecast = ugarchforecast(egarch11.t.fit, data = df, n.ahead = 1)
+
+previsao_dia_seguinte = data.frame(data = Sys.Date() + 1,
+                          previsao_retorno = round(forecast@forecast$seriesFor[1], 4),
+                          previsao_sigma = round(forecast@forecast$sigmaFor[1], 4))
+
+
+```
+email
+```{r}
+arquivo = write_csv(new_forecast, file = paste0(previsao_dia_seguinte$data, "_previsao_v187939.csv"), 
+          append = FALSE, col_names = TRUE)
+
+
+corpo = compose_email(body = md("Victor Kemparski, 187939"))
+
+
+corpo %>% 
+  add_attachment(file = arquivo,filename = "_previsao_v187939.csv") %>% 
+  smtp_send(from = "victorkempa@outlook.com",
+            to = c("ctrucios@dac.unicamp.br"),
+            subject = "Previsão contrato futuro açúcar",
+            credentials = creds_file("cred"))
+
+```
+
+Foram aplicados modelos GARCH (2,2), GARCH(1,1) com erros distribuídos normalmente, modelo GARCH(1,1) com distribuição t, modelo GARCH(1,1) com distribuição t assimétrica, modelo eGARCH(1,1) com distribuição t, modelo fGARCH(1,1) com distribuição t e modelo iGARCH (1,1) com distribuição normal para ajustar os dados dos preços diários históricos das ações da Apple (preços de abertura, máxima, mínima, fechamento e ajustados) de 1 de Janeiro de 2015 a 27 de junho de 2023.
+
+Resumindo, o modelo eGARCH (1,1) com distribuição t foi selecionado como o modelo mais apropriado para ajustar e prever a tendência nos preços das ações no ultimo ano.
+
+
+
+```{r}
+ui <- fluidPage(
+  titlePanel("Dashboard do modelo eGARCH(1,1) Açúcar futuro"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      
+    ),
+    
+    mainPanel(
+      plotOutput("ts"),
+      tableOutput("resultados_modelo")
+    )
+  )
+)
+
+server <- function(input, output) {
+  # Gerar o gráfico de retornos
+  output$grafico_retorno <- renderPlot({
+    p
+  })
+  
+  # Exibir os resultados do modelo
+  saida <- renderTable({
+    ts_dados_acucar
+    
+  })
+}
+
+# Executar o dashboard
+shinyApp(ui = ui, server = server)
+
+```
+
